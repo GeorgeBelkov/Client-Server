@@ -31,6 +31,8 @@ public:
     }
     ~Player() = default;
 
+    bool operator==(const Player& other) { return this->player_socket == other.player_socket; }
+
     int getSock() const;
     char* getField() { return field.data(); }
     Player* getEnemy();

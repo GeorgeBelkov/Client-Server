@@ -15,6 +15,7 @@
 #include <fcntl.h>
 
 #include "Player.hpp"
+#include "Logger.hpp"
 
 
 constexpr size_t null = 0;

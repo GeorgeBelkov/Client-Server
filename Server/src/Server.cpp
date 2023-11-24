@@ -67,9 +67,6 @@ Server::Server()
 
 void Server::acceptNewClient()
 {
-    /* TODO логика создания игровой сессии для 2х игроков,
-       подключившихся к серверу [void makeGameSession()]  */
-
     try
     {
         int new_client = accept(server_sock, NULL, NULL);
@@ -173,8 +170,7 @@ void Server::EventHandler(const char* buffer, size_t bytes_read, int client)
         send(client, "ok:", sizeof("ok:"), 0);
     else if (std::regex_match(message, std::regex("field:[0-1]{100}")))
     {
-        std::string field;
-        std::copy(message.begin() + std::size("field:"), message.end(), field);
+        std::string field = message.substr(std::size("field:"));
         if (isFieldValid(field.data()))
         {
             Player player(client, field.data());
@@ -204,6 +200,8 @@ void Server::EventHandler(const char* buffer, size_t bytes_read, int client)
         {
             send(assaulter->getSock(), "hit:", sizeof("hit:"), 0);
             assaulter->getEnemy()->countHittedCells();
+
+            // Если атакующий игрок поразил все корабли соперника - завершаем игру
             if (assaulter->getEnemy()->getHittedCells() == 20)
                 closeGameSession(*assaulter, *assaulter->getEnemy());
         }
@@ -212,8 +210,16 @@ void Server::EventHandler(const char* buffer, size_t bytes_read, int client)
             send(assaulter->getSock(), "miss:", sizeof("miss:"), 0);
             assaulter->setPLayersState(PlayersState::WHAITING);
             assaulter->getEnemy()->setPLayersState(PlayersState::MAKING_STEP);
-        } 
+        }
+
+        // Отсылаем информацию сопернику атакующего игрока, чтобы обновить игровое поле
         send(assaulter->getEnemy()->getSock(), message.data(), sizeof(message.data()), 0);
+    }
+    else
+    {
+        // Обработка ошибочных сообщений от клиента
+        Logger::getLoggerInstance() << "От клиента: "
+            << std::to_string(client) << " Полученны некорректные данные: " << message.data();
     }
 }
 
