@@ -38,18 +38,22 @@ private:
     sockaddr_in server_addres;
     std::set<int> connected_clients;
     std::list<Player> initiators;
+    std::list<Player> secondaries;
     
 public:
     Server();
     ~Server() = default;
+    Server(const Server&) = delete;
+    Server& operator=(const Server&) = delete;
 
-    void createAddres();
+    void createAddress();
     void acceptNewClient();
     void runServer();
     
     void makeGameSession(Player& first, Player& second);
-    void closeGameSession(const Player& first, const Player& second);
+    void closeGameSession(Player& first, Player& second);
     void EventHandler(const char* buffer, size_t bytes_read, int client);
     
     bool isFieldValid(char* field);
+    int sendAll(int socket, std::string buffer, int flags = 0);
 };

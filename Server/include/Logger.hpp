@@ -1,6 +1,11 @@
 #pragma once
 
 #include <fstream>
+#include <filesystem>
+
+static std::filesystem::path filepath = "/home/bigfalby/Desktop/Projects/Client-Server/Server/LOGGER.txt";
+
+
 
 /*
     Реализованный на базе паттерна проектирования
@@ -18,8 +23,8 @@ private:
     Logger() = default;
     ~Logger() = default;
 
-    void openLogFile() { logfile.open("Server/LOGGER.txt"); }
-    void closeLogFile() { logfile.close(); }
+    void openLogFile() { Logger::getLoggerInstance().logfile.open(filepath, std::ios::app); }
+    void closeLogFile() { Logger::getLoggerInstance().logfile.close(); }
 
 public:
     static Logger& getLoggerInstance()
@@ -33,7 +38,7 @@ public:
         // Открываем файл
         Logger::getLoggerInstance().openLogFile();
         // Пишем в файл
-        Logger::getLoggerInstance().logfile << string << std::endl;
+        Logger::getLoggerInstance().logfile << string;
         // Закрываем файл
         Logger::getLoggerInstance().closeLogFile();
 

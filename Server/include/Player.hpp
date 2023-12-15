@@ -2,6 +2,7 @@
 
 #include <array>
 #include <iostream>
+#include <algorithm>
 
 
 constexpr size_t CELLS_IN_FIELD = 100;
@@ -21,24 +22,24 @@ class Player
 private:
     int player_socket;
     Player* enemy;
-    std::array<char, CELLS_IN_FIELD> field = {};
+    std::string field;
     PlayersState curr_state = PlayersState::NULL_ST;
     size_t ship_defeated_cells = 0;
+
+    Player& operator=(const Player& other) = delete;
 public:
-    Player(int socket, char* buffer): player_socket(socket), enemy(nullptr)
-    {
-        std::copy(buffer, buffer + field.size(), field.begin());
-    }
+    Player(int socket, std::string buffer): player_socket(socket), enemy(nullptr), field(buffer) {}
     ~Player() = default;
 
-    bool operator==(const Player& other) { return this->player_socket == other.player_socket; }
+    bool operator==(const Player& other) { return player_socket == other.player_socket; }
 
-    int getSock() const;
-    char* getField() { return field.data(); }
-    Player* getEnemy();
+    int getSock() const { return player_socket; }
+    std::string& getField() { return field; }
+    Player* getEnemy() { return enemy; }
     size_t getHittedCells() const { return ship_defeated_cells; }
 
-    void setEnemy(Player& enemy);
+    void setEnemy(Player& player) { enemy = &player; }
     void setPLayersState(PlayersState state) { curr_state = state; }
     void countHittedCells() { ++ship_defeated_cells; }
+    PlayersState getState() const { return curr_state; }
 };

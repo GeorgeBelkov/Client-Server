@@ -1,7 +1,7 @@
 #include "../include/Server.hpp"
 
 
-void Server::createAddres()
+void Server::createAddress()
 {
     // Cистема выберет неиспользуемый номер порта
     size_t DEFAULT_PORT = null;
@@ -12,13 +12,32 @@ void Server::createAddres()
 }
 
 
+int Server::sendAll(int socket, std::string buffer, int flags)
+{
+    auto message_size = buffer.length();
+    int bytes = 0, sended_bytes = 0;
+
+    while (sended_bytes < message_size)
+    {
+        bytes = send(socket, buffer.data() + sended_bytes, (message_size - sended_bytes + 1), flags);
+        if (bytes == -1)
+            break;
+        sended_bytes += bytes; 
+    }
+
+    return (bytes == -1 ? -1 : sended_bytes); 
+}
+
+
 Server::Server()
 {
     try
     {
+        initiators.clear();
+        secondaries.clear();
         connected_clients.clear();
         // Создание адреса слушающего сокета сервера
-        createAddres();
+        createAddress();
 
         // Получение дескриптора сокета
         server_sock = socket(AF_INET, SOCK_STREAM, null);
@@ -87,7 +106,7 @@ void Server::runServer()
 {
     // Задаём задержку
     timeval timeout;
-    timeout.tv_sec = 15;
+    timeout.tv_sec = 1;
     timeout.tv_usec = 0;
     
     std::array<char, BUFFER_SIZE> buffer;
@@ -106,7 +125,7 @@ void Server::runServer()
 
         // Ждём события в одном из сокетов
         int max_sock_val = std::max(server_sock, *std::max_element(connected_clients.begin(), connected_clients.end()));
-        if(select(max_sock_val + 1, &readset, NULL, NULL, &timeout) <= 0)
+        if (select(max_sock_val + 1, &readset, NULL, NULL, &timeout) < 0)
         {
             perror("select");
             exit(3);
@@ -133,10 +152,12 @@ void Server::runServer()
 void Server::makeGameSession(Player& first, Player& second)
 {
     first.setEnemy(second);
-    send(first.getSock(), "found:", sizeof("found:"), 0);
-    send(second.getSock(), "found:", sizeof("found:"), 0);
-    send(first.getSock(), "go:", sizeof("go:"), 0);
-    send(second.getSock(), "wait:", sizeof("wait:"), 0);
+    second.setEnemy(first);
+
+    sendAll(first.getSock(), "found:", 0);
+    sendAll(second.getSock(), "found:", 0);
+    sendAll(first.getSock(), "go:", 0);
+    sendAll(second.getSock(), "wait:", 0);
 
     // Set states for players
     first.setPLayersState(PlayersState::MAKING_STEP);
@@ -144,15 +165,16 @@ void Server::makeGameSession(Player& first, Player& second)
 }
 
 
-void Server::closeGameSession(const Player& first, const Player& second)
+void Server::closeGameSession(Player& first, Player& second)
 {
     // Удаляем инициатора игры из списка
     initiators.remove(first);
+    secondaries.remove(second);
 
-    send(first.getSock(), "win:", sizeof("win:"), 0);
-    send(second.getSock(), "lost:", sizeof("lost:"), 0);
-    send(first.getSock(), "disconnected:", sizeof("disconnected:"), 0);
-    send(second.getSock(), "disconnected:", sizeof("disconnected:"), 0);
+    sendAll(first.getSock(), "win:", 0);
+    sendAll(first.getSock(), "disconnected:", 0);
+    sendAll(second.getSock(), "lost:", 0);
+    sendAll(second.getSock(), "disconnected:", 0);
 
     // Удаляем сокеты клиентов из списка подключенных
     connected_clients.erase(first.getSock());
@@ -161,65 +183,87 @@ void Server::closeGameSession(const Player& first, const Player& second)
 
 
 void Server::EventHandler(const char* buffer, size_t bytes_read, int client)
-{
-    std::string message(buffer, bytes_read);
-    
-    if (message == "connect:")
-        send(client, "connected:", sizeof("connected:"), 0);
-    else if (message == "start:")
-        send(client, "ok:", sizeof("ok:"), 0);
+{   
+    std::string message(buffer, bytes_read - 1);
+
+    // Логгируем
+    Logger::getLoggerInstance() << "Player id: " << std::to_string(client) << "\n";
+    Logger::getLoggerInstance() << std::to_string(message.length()) << "\n";
+    Logger::getLoggerInstance() << "recieved message: " << message.data() << "\n\n";
+
+    if (!message.compare("connect:"))
+        sendAll(client, "connected:", 0);
+    else if (!message.compare("start:"))
+        sendAll(client, "ok:", 0);
     else if (std::regex_match(message, std::regex("field:[0-1]{100}")))
     {
-        std::string field = message.substr(std::size("field:"));
-        if (isFieldValid(field.data()))
+        std::string field = message.substr(std::size("field:") - 1);
+        auto temp = field;
+        if (isFieldValid(temp.data()))
         {
-            Player player(client, field.data());
-            if (initiators.size() == 0 && initiators.back().getEnemy() != nullptr)
+            Player player(client, field);
+            if (initiators.size() == 0 || initiators.back().getEnemy() != nullptr)
                 initiators.push_back(player);
             else
+            {
                 // Создаем соединение между двумя клиентами
-                makeGameSession(initiators.back(), player);
-            
+                secondaries.push_back(player);
+                makeGameSession(initiators.back(), secondaries.back());
+            }
         }
         else // Если поле некорректно, отсылаем сообщение клиенту
-            send(client, "field_not_valid:", sizeof("field_not_valid:"), 0);
+            sendAll(client, "field_not_valid:", 0);
     }
     else if (std::regex_match(message, std::regex("cell:[0-9]:[0-9]")))
     {
-        // TODO: Если у оппонента в клетке: 1, то отсылаем, hit: иначе - miss:
-        Player* assaulter = nullptr;
+        Player* assaulter = &(initiators.back());
         for (auto& player : initiators)
         {
             if (player.getSock() == client)
+            {
                 assaulter = &player;
+                break;
+            }
             else if (player.getEnemy()->getSock() == client)
+            {
                 assaulter = player.getEnemy();
-            else break;
+                break;
+            }
+            else continue;
         }
-        if (assaulter->getEnemy()->getField()[CELLS_IN_ROW * std::atoi(message.data() + 5) + atoi(message.data() + 7)] == '1')
+
+        if (assaulter->getState() == PlayersState::WHAITING)
         {
-            send(assaulter->getSock(), "hit:", sizeof("hit:"), 0);
+            Logger::getLoggerInstance() << "Player id: " << std::to_string(client) << "\n";
+            Logger::getLoggerInstance() << "You must whait!" << "\n\n";
+            return;
+        }
+        
+        auto row = std::atoi(message.data() + 5);
+        auto column = std::atoi(message.data() + 7);
+
+        // Если у оппонента в клетке: 1, то отсылаем, hit: иначе - miss:
+        if (assaulter->getEnemy()->getField().data()[CELLS_IN_ROW * row + column] == '1')
+        {
+            sendAll(assaulter->getSock(), "hit:", 0);
             assaulter->getEnemy()->countHittedCells();
 
             // Если атакующий игрок поразил все корабли соперника - завершаем игру
             if (assaulter->getEnemy()->getHittedCells() == 20)
-                closeGameSession(*assaulter, *assaulter->getEnemy());
+                closeGameSession(*(assaulter), *(assaulter->getEnemy()));
         }
         else
         {
-            send(assaulter->getSock(), "miss:", sizeof("miss:"), 0);
+            sendAll(assaulter->getSock(), "miss:", 0);
             assaulter->setPLayersState(PlayersState::WHAITING);
             assaulter->getEnemy()->setPLayersState(PlayersState::MAKING_STEP);
         }
-
-        // Отсылаем информацию сопернику атакующего игрока, чтобы обновить игровое поле
-        send(assaulter->getEnemy()->getSock(), message.data(), sizeof(message.data()), 0);
     }
     else
     {
         // Обработка ошибочных сообщений от клиента
         Logger::getLoggerInstance() << "От клиента: "
-            << std::to_string(client) << " Полученны некорректные данные: " << message.data();
+            << std::to_string(client) << " Полученны некорректные данные: " << message.data() << "\n";
     }
 }
 
@@ -232,7 +276,7 @@ bool Server::isFieldValid(char* field)
 
     /*
         Двигаемся вдоль поля. Если ячейка непуста (часть корабля или однопалубный)
-        То увеличиваем счетчик непустых ячеек (их должно оказаться не больше 20).
+        То увеличиваем счетчик непустых ячеек (их должно оказаться ровно 20).
         Если справа от этой ячейки непусто - идем вправо пока не будет пусто
         (или стенка), параллельно считая палубы (счетчик k = 1). Если в конце
         (когда сработает одно из вышеупомянутых условий) счетчик k будет больше 4х,
@@ -277,7 +321,10 @@ bool Server::isFieldValid(char* field)
                     ships_counter[0]++;
                 }
                 if (!incorrect_ship_flag)
+                {
                     return false;
+                    std::cout << "debug1\n";
+                }
             }
             else continue;
         }
